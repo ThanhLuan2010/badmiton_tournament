@@ -3,13 +3,17 @@ import './App.css'
 import PlayerInput from './components/PlayerInput'
 import TeamList from './components/TeamList'
 import TournamentBracket from './components/TournamentBracket'
+import GroupStage from './components/GroupStage'
 import { generateTeams, type Team } from './utils/pairing'
 import { generateBracket, type Match } from './utils/tournament'
+import { generateGroups, type Group, calculateGroupStandings } from './utils/group'
 
 function App() {
-  const [step, setStep] = useState<'input' | 'teams' | 'tournament'>('input');
+  const [step, setStep] = useState<'input' | 'teams' | 'groups' | 'tournament'>('input');
   const [teams, setTeams] = useState<Team[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [champion, setChampion] = useState<Team | null>(null);
 
   const handleGenerateTeams = (males: string[], females: string[]) => {
     const newTeams = generateTeams(males, females);
@@ -21,10 +25,50 @@ function App() {
     setStep('teams');
   };
 
-  const handleStartTournament = () => {
-    const bracket = generateBracket(teams);
-    setMatches(bracket);
-    setStep('tournament');
+  const handleStartGroupStage = () => {
+    // Generate Groups
+    const newGroups = generateGroups(teams);
+    setGroups(newGroups);
+    setStep('groups');
+  };
+
+  const handleUpdateGroupMatch = (groupId: string, matchId: string, scoreA: number, scoreB: number, isFinished: boolean) => {
+    setGroups(prevGroups => prevGroups.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        matches: g.matches.map(m => {
+          if (m.id !== matchId) return m;
+          return { ...m, scoreA, scoreB, isFinished };
+        })
+      };
+    }));
+  };
+
+  const handleFinishGroupStage = () => {
+    // 1. Identify winners of each group
+    const winners: Team[] = [];
+    groups.forEach(g => {
+      const standings = calculateGroupStandings(g);
+      if (standings.length > 0) {
+        winners.push(standings[0].team);
+      }
+    });
+
+    if (winners.length === 0) return; // Should not happen
+
+    if (winners.length === 1) {
+      // Direct Champion
+      setChampion(winners[0]);
+      setMatches([]); // No bracket needed
+      setStep('tournament');
+    } else {
+      // Generate Bracket
+      const bracket = generateBracket(winners);
+      setMatches(bracket);
+      setChampion(null); // Will be decided in bracket
+      setStep('tournament');
+    }
   };
 
   const handleDeclareWinner = (matchId: string, winner: Team) => {
@@ -41,14 +85,6 @@ function App() {
         const nextMatchIndex = updatedMatches.findIndex(m => m.id === match.nextMatchId);
         if (nextMatchIndex !== -1) {
           const nextMatch = { ...updatedMatches[nextMatchIndex] };
-
-          // Determine if this winner goes to A or B slot?
-          // We can check if the current match is the 'A' source or 'B' source for the next match.
-          // BUT, my util didn't explicitly store "Source A/B".
-          // However, my util pushed matches in pairs: [0,1] -> next[0].
-          // match.matchIndex is key.
-          // If matchIndex is even (0, 2, 4), it goes to teamA of next match.
-          // If matchIndex is odd (1, 3, 5), it goes to teamB of next match.
 
           if (match.matchIndex % 2 === 0) {
             nextMatch.teamA = winner;
@@ -67,7 +103,9 @@ function App() {
     if (confirm("Bạn có chắc muốn làm lại từ đầu?")) {
       setStep('input');
       setTeams([]);
+      setGroups([]);
       setMatches([]);
+      setChampion(null);
     }
   };
 
@@ -86,16 +124,38 @@ function App() {
 
       {step === 'teams' && (
         <div style={{ animation: 'fadeIn 0.5s' }}>
-          <TeamList teams={teams} onStartTournament={handleStartTournament} />
+          <TeamList teams={teams} onStartTournament={handleStartGroupStage} />
           <div className="actions" style={{ marginTop: '1rem' }}>
             <button onClick={() => setStep('input')} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Quay lại</button>
           </div>
         </div>
       )}
 
+      {step === 'groups' && (
+        <div style={{ animation: 'fadeIn 0.5s' }}>
+          <GroupStage
+            groups={groups}
+            onUpdateMatch={handleUpdateGroupMatch}
+            onFinishGroupStage={handleFinishGroupStage}
+          />
+          <div className="actions" style={{ marginTop: '1rem' }}>
+            <button onClick={() => setStep('teams')} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Quay lại</button>
+          </div>
+        </div>
+      )}
+
       {step === 'tournament' && (
         <div style={{ animation: 'fadeIn 0.5s' }}>
-          <TournamentBracket matches={matches} onDeclareWinner={handleDeclareWinner} />
+          {champion && matches.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem' }}>
+              <h2>🏆 NHÀ VÔ ĐỊCH 🏆</h2>
+              <h1 style={{ fontSize: '3rem', color: '#fbbf24', marginTop: '1rem' }}>{champion.name}</h1>
+              <p style={{ marginTop: '2rem', fontStyle: 'italic', opacity: 0.8 }}>Chiến thắng thuyết phục ngay từ vòng bảng!</p>
+            </div>
+          ) : (
+            <TournamentBracket matches={matches} onDeclareWinner={handleDeclareWinner} />
+          )}
+
           <div className="actions" style={{ marginTop: '2rem' }}>
             <button onClick={handleReset} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Làm mới giải đấu</button>
           </div>
